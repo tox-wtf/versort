@@ -2,45 +2,33 @@ use core::fmt;
 
 use std::env::args;
 use std::io::{self, BufRead};
-use std::process::exit;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed as Lax};
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-static RECOGNIZED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[0-9][-_\.]?(dev|pre|next|alpha|[^a-z]a|beta|[^a-z]b|r?c|patch|[^a-z]p)"#).expect("Invalid regex"));
-static COUNT_IS_CHAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[^a-z]([a-z])$"#).expect("Invalid regex"));
+static RECOGNIZED_RE:   LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[0-9][-_\.]?(dev|pre|next|alpha|[^a-z]a|beta|[^a-z]b|r?c|patch|[^a-z]p)"#).expect("Invalid regex"));
+static COUNT_IS_CHAR:   LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[^a-z]([a-z])$"#).expect("Invalid regex"));
 
-static RKIND_DEV: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"dev"#).expect("Invalid regex"));
-static RKIND_PRE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"pre"#).expect("Invalid regex"));
-static RKIND_NEXT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"next"#).expect("Invalid regex"));
-static RKIND_ALPHA: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(alpha|a)([0-9]+)?$"#).expect("Invalid regex"));
-static RKIND_BETA: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(beta|b)([0-9]+)?$"#).expect("Invalid regex"));
-static RKIND_RC: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^r?c([0-9]+)?$"#).expect("Invalid regex"));
-static RKIND_PATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(patch|p)([0-9]+)?$"#).expect("Invalid regex"));
+static RKIND_DEV:       LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"dev"#).expect("Invalid regex"));
+static RKIND_PRE:       LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"pre"#).expect("Invalid regex"));
+static RKIND_NEXT:      LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"next"#).expect("Invalid regex"));
+static RKIND_ALPHA:     LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(alpha|a)([0-9]+)?$"#).expect("Invalid regex"));
+static RKIND_BETA:      LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(beta|b)([0-9]+)?$"#).expect("Invalid regex"));
+static RKIND_RC:        LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^r?c([0-9]+)?$"#).expect("Invalid regex"));
+static RKIND_PATCH:     LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(patch|p)([0-9]+)?$"#).expect("Invalid regex"));
 
-static VERBOSE: AtomicBool = AtomicBool::new(false);
-static FORMAT: AtomicBool = AtomicBool::new(false);
-static LENIENT: AtomicBool = AtomicBool::new(false);
-static IGNORE: AtomicBool = AtomicBool::new(false);
-static CHARCOUNT: AtomicBool = AtomicBool::new(false);
+static VERBOSE:         AtomicBool      = AtomicBool::new(false);
+static FORMAT:          AtomicBool      = AtomicBool::new(false);
+static LENIENT:         AtomicBool      = AtomicBool::new(false);
+static IGNORE:          AtomicBool      = AtomicBool::new(false);
+static CHARCOUNT:       AtomicBool      = AtomicBool::new(false);
 
-macro_rules! vprint {
-    ($($arg:tt)*) => {{
-        if VERBOSE.load(Lax) {
-            eprint!($($arg)*);
-        }
-    }};
-}
-
-macro_rules! vprintln {
-    ($($arg:tt)*) => {{
-        if VERBOSE.load(Lax) {
-            eprintln!($($arg)*);
-        }
-    }};
-}
+macro_rules! die        { ($($arg:tt)*) => {{ eprintln!($($arg)*); std::process::exit(1); }}; }
+macro_rules! quit       { ($($arg:tt)*) => {{ println!($($arg)*); std::process::exit(0); }}; }
+macro_rules! vprint     { ($($arg:tt)*) => {{ if VERBOSE.load(Lax) { eprint!($($arg)*); } }}; }
+macro_rules! vprintln   { ($($arg:tt)*) => {{ if VERBOSE.load(Lax) { eprintln!($($arg)*); } }}; }
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub enum ReleaseKind {
@@ -90,14 +78,14 @@ impl fmt::Display for Semver {
         if let Some(part) = self.ident { write!(f, ".{part}")?; }
 
         match self.rkind {
-            ReleaseKind::Dev => write!(f, "-dev")?,
-            ReleaseKind::Pre => write!(f, "-pre")?,
-            ReleaseKind::Next => write!(f, "-next")?,
-            ReleaseKind::Alpha => write!(f, "-alpha")?,
-            ReleaseKind::Beta => write!(f, "-beta")?,
-            ReleaseKind::Rc => write!(f, "-rc")?,
+            ReleaseKind::Dev    => write!(f, "-dev")?,
+            ReleaseKind::Pre    => write!(f, "-pre")?,
+            ReleaseKind::Next   => write!(f, "-next")?,
+            ReleaseKind::Alpha  => write!(f, "-alpha")?,
+            ReleaseKind::Beta   => write!(f, "-beta")?,
+            ReleaseKind::Rc     => write!(f, "-rc")?,
+            ReleaseKind::Patch  => write!(f, "p")?,
             ReleaseKind::Stable => {},
-            ReleaseKind::Patch => write!(f, "p")?,
         };
 
         if let Some(count) = self.count {
@@ -128,10 +116,8 @@ impl fmt::Display for ParseSemverError {
     }
 }
 
-fn recognized(s: &str, charcount: bool, lenient: bool) -> bool {
-    if lenient {
-        true
-    } else if charcount {
+fn recognized(s: &str) -> bool {
+    if CHARCOUNT.load(Lax) {
         COUNT_IS_CHAR.is_match(s)
     } else {
         RECOGNIZED_RE.is_match(s)
@@ -142,28 +128,23 @@ impl FromStr for Semver {
     type Err = ParseSemverError;
 
     fn from_str(naive: &str) -> Result<Self, Self::Err> {
-        let s = naive.to_ascii_lowercase();
-        let s = s.as_str();
-        let s = if let Some(idx) = s.find(|c: char| c.is_ascii_alphabetic()) {
-            if !recognized(s, CHARCOUNT.load(Lax), LENIENT.load(Lax)) {
+        let mut s = naive.to_ascii_lowercase();
+
+        if let Some(idx) = s.find(|c: char| c.is_ascii_alphabetic()) {
+            if !recognized(&s) || !LENIENT.load(Lax) {
                 return Err(ParseSemverError::UnrecognizedText)
             }
-
-            let mut str = s.to_string();
 
             // remove dot following the final character (e.g. 1.0.0-rc.1 -> 1.0.0-rc1)
             if let Some(letter_idx) = s.rfind(|c: char| c.is_ascii_alphabetic())
                 && let Some(dot_idx) = s.rfind('.')
                 && dot_idx == letter_idx + 1
             {
-                str.remove(dot_idx);
+                s.remove(dot_idx);
             }
 
-            str.insert(idx, '.');
-            str
-        } else {
-            s.into()
-        };
+            s.insert(idx, '.');
+        }
 
         // remove dashes or underscores (e.g. 1.0.0-rc1 -> 1.0.0rc1)
         let s = s.replace(['-',  '_'], "");
@@ -199,11 +180,8 @@ impl FromStr for Semver {
             }
         }
 
-        if matches!(semver.rkind, ReleaseKind::Stable) {
-            return Ok(semver)
-        }
-
-        if let Some(count) = s.rsplit_once(|c: char| c.is_ascii_alphabetic()).and_then(|ct| {
+        if !matches!(semver.rkind, ReleaseKind::Stable)
+        && let Some(count) = s.rsplit_once(|c: char| c.is_ascii_alphabetic()).and_then(|ct| {
             let ct = ct.1;
             if ct.is_empty() { Some(1) } else { ct.parse::<u64>().ok() }
         }) {
@@ -216,7 +194,7 @@ impl FromStr for Semver {
 }
 
 fn help() {
-    println! {
+    quit! {
 "\
 \x1b[4;1mUsage:\x1b[0;1m versort \x1b[0m[OPTIONS]
 
@@ -235,12 +213,10 @@ fn help() {
     sed 's/^v//' data.txt | \x1b[1mversort\x1b[0m -lif
 "
     }
-    exit(0);
 }
 
 fn version() {
-    println!("versort {}", env!("CARGO_PKG_VERSION"));
-    exit(0);
+    quit!("versort {}", env!("CARGO_PKG_VERSION"));
 }
 
 fn main() {
@@ -254,7 +230,7 @@ fn main() {
                 "--verbose" => VERBOSE.store(true, Lax),
                 "--help" => help(),
                 "--version" => version(),
-                _ => eprintln!("Unrecognized flag: {arg}"),
+                _ => die!("Unrecognized flag: {arg}"),
             }
         } else if arg.starts_with('-') && arg.len() > 1 {
             for ch in arg.chars().skip(1) {
@@ -266,11 +242,11 @@ fn main() {
                     'v' => VERBOSE.store(true, Lax),
                     'h' => help(),
                     'V' => version(),
-                    _ => eprintln!("Unrecognized flag: {arg}")
+                    _ => die!("Unrecognized flag: {arg}")
                 }
             }
         } else {
-            eprintln!("Unrecognized argument: {arg}")
+            die!("Unrecognized argument: {arg}")
         }
     }
 
@@ -285,10 +261,7 @@ fn main() {
                 Ok(s) => Some((v, s)),
                 Err(e) => {
                     if IGNORE.load(Lax) { None }
-                    else {
-                        eprintln!("Failed to parse {v} into a semver: {e}");
-                        exit(1);
-                    }
+                    else { die!("Failed to parse {v} into a semver: {e}"); }
                 }
             }
         })
