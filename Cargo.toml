@@ -1,0 +1,12 @@
+[package]
+name = "versort"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+regex = "1"
+
+[profile.release]
+opt-level = 3
+strip = "symbols"
+lto = "fat"
