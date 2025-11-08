@@ -131,7 +131,7 @@ impl FromStr for Semver {
         let mut s = naive.to_ascii_lowercase();
 
         if let Some(idx) = s.find(|c: char| c.is_ascii_alphabetic()) {
-            if !recognized(&s) || !LENIENT.load(Lax) {
+            if !recognized(&s) && !LENIENT.load(Lax) {
                 return Err(ParseSemverError::UnrecognizedText)
             }
 
