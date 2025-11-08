@@ -3,11 +3,13 @@ use core::fmt;
 use std::env::args;
 use std::io::{self, BufRead};
 use std::process::exit;
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed as Lax};
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-static RECOGNIZED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[0-9][-_\.]?(dev|pre|next|alpha|[^a-z]a|beta|[^a-z]b|rc|patch|[^a-z]p)"#).expect("Invalid regex"));
+static RECOGNIZED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[0-9][-_\.]?(dev|pre|next|alpha|[^a-z]a|beta|[^a-z]b|r?c|patch|[^a-z]p)"#).expect("Invalid regex"));
 static COUNT_IS_CHAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[^a-z]([a-z])$"#).expect("Invalid regex"));
 
 static RKIND_DEV: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"dev"#).expect("Invalid regex"));
@@ -15,8 +17,30 @@ static RKIND_PRE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"pre"#).expect
 static RKIND_NEXT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"next"#).expect("Invalid regex"));
 static RKIND_ALPHA: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(alpha|a)([0-9]+)?$"#).expect("Invalid regex"));
 static RKIND_BETA: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(beta|b)([0-9]+)?$"#).expect("Invalid regex"));
-static RKIND_RC: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^rc([0-9]+)?$"#).expect("Invalid regex"));
+static RKIND_RC: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^r?c([0-9]+)?$"#).expect("Invalid regex"));
 static RKIND_PATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(patch|p)([0-9]+)?$"#).expect("Invalid regex"));
+
+static VERBOSE: AtomicBool = AtomicBool::new(false);
+static FORMAT: AtomicBool = AtomicBool::new(false);
+static LENIENT: AtomicBool = AtomicBool::new(false);
+static IGNORE: AtomicBool = AtomicBool::new(false);
+static CHARCOUNT: AtomicBool = AtomicBool::new(false);
+
+macro_rules! vprint {
+    ($($arg:tt)*) => {{
+        if VERBOSE.load(Lax) {
+            eprint!($($arg)*);
+        }
+    }};
+}
+
+macro_rules! vprintln {
+    ($($arg:tt)*) => {{
+        if VERBOSE.load(Lax) {
+            eprintln!($($arg)*);
+        }
+    }};
+}
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub enum ReleaseKind {
@@ -25,7 +49,7 @@ pub enum ReleaseKind {
     Next,
     Alpha,
     Beta,
-    ReleaseCandidate,
+    Rc,
     #[default]
     Stable,
     Patch,
@@ -58,7 +82,6 @@ impl Ord for Semver {
     }
 }
 
-// FIXME: should account for count_is_char fuckery
 impl fmt::Display for Semver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.major)?;
@@ -72,12 +95,20 @@ impl fmt::Display for Semver {
             ReleaseKind::Next => write!(f, "-next")?,
             ReleaseKind::Alpha => write!(f, "-alpha")?,
             ReleaseKind::Beta => write!(f, "-beta")?,
-            ReleaseKind::ReleaseCandidate => write!(f, "-rc")?,
-            ReleaseKind::Stable => return Ok(()),
+            ReleaseKind::Rc => write!(f, "-rc")?,
+            ReleaseKind::Stable => {},
             ReleaseKind::Patch => write!(f, "p")?,
         };
 
-        if let Some(count) = self.count { write!(f, "{count}")?; }
+        if let Some(count) = self.count {
+            if CHARCOUNT.load(Lax) {
+                // SAFETY: `count` is derived from an ASCII alphabetic character
+                write!(f, "{}", unsafe { char::from_u32_unchecked(count as u32) })?;
+            } else {
+                write!(f, "{count}")?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -97,22 +128,24 @@ impl fmt::Display for ParseSemverError {
     }
 }
 
-fn recognized(s: &str, count_is_char: bool, lenient: bool) -> bool {
+fn recognized(s: &str, charcount: bool, lenient: bool) -> bool {
     if lenient {
         true
-    } else if count_is_char {
+    } else if charcount {
         COUNT_IS_CHAR.is_match(s)
     } else {
         RECOGNIZED_RE.is_match(s)
     }
 }
 
-impl Semver {
-    pub fn parse(naive: &str, lenient: bool, count_is_char: bool) -> Result<Self, ParseSemverError> {
+impl FromStr for Semver {
+    type Err = ParseSemverError;
+
+    fn from_str(naive: &str) -> Result<Self, Self::Err> {
         let s = naive.to_ascii_lowercase();
         let s = s.as_str();
         let s = if let Some(idx) = s.find(|c: char| c.is_ascii_alphabetic()) {
-            if !recognized(s, count_is_char, lenient) {
+            if !recognized(s, CHARCOUNT.load(Lax), LENIENT.load(Lax)) {
                 return Err(ParseSemverError::UnrecognizedText)
             }
 
@@ -146,24 +179,23 @@ impl Semver {
         };
 
         if let Some(last_bit) = parts.next_back().filter(|p| p.parse::<u64>().is_err()) {
-            if count_is_char && let Some(caps) = COUNT_IS_CHAR.captures(&s) {
+            if CHARCOUNT.load(Lax) && let Some(caps) = COUNT_IS_CHAR.captures(&s) {
                 let m = caps.get(1).unwrap();
                 let ct = m.as_str().chars().next().unwrap() as u64;
                 semver.count = Some(ct);
             } else {
-                // dbg!(&last_bit);
-                // eprint!("Matched {last_bit} to ");
+                vprint!("Matched {last_bit} to ");
                 semver.rkind = match &last_bit {
                     s if RKIND_DEV.is_match(s) => ReleaseKind::Dev,
                     s if RKIND_PRE.is_match(s) => ReleaseKind::Pre,
                     s if RKIND_NEXT.is_match(s) => ReleaseKind::Next,
                     s if RKIND_ALPHA.is_match(s) => ReleaseKind::Alpha,
                     s if RKIND_BETA.is_match(s) => ReleaseKind::Beta,
-                    s if RKIND_RC.is_match(s) => ReleaseKind::ReleaseCandidate,
+                    s if RKIND_RC.is_match(s) => ReleaseKind::Rc,
                     s if RKIND_PATCH.is_match(s) => ReleaseKind::Patch,
                     _ => ReleaseKind::Stable,
                 };
-                // eprintln!("{:?}", semver.rkind);
+                vprintln!("{:?}", semver.rkind);
             }
         }
 
@@ -178,32 +210,62 @@ impl Semver {
             semver.count = Some(count);
         }
 
-        // eprintln!("Parsed semver '{semver}' from '{naive}'");
+        vprintln!("Parsed semver '{semver}' from '{naive}'");
         Ok(semver)
     }
 }
 
+fn help() {
+    println! {
+"\
+\x1b[4;1mUsage:\x1b[0;1m versort \x1b[0m[OPTIONS]
+
+\x1b[4;1mOptions:\x1b[0m
+    \x1b[1m-i | --ignore\x1b[0m       ignore versions that could not be parsed
+    \x1b[1m-f | --format\x1b[0m       format versions in output
+    \x1b[1m-l | --lenient\x1b[0m      parse versions more leniently
+    \x1b[1m-c | --charcount\x1b[0m    treat a single trailing character as a counter
+
+    \x1b[1m-v | --verbose\x1b[0m      print verbose messages to stderr
+    \x1b[1m-h | --help\x1b[0m         display help
+    \x1b[1m-V | --version\x1b[0m      display version
+
+\x1b[4;1mExamples:\x1b[0m
+    \x1b[1mversort\x1b[0m < data.txt
+    sed 's/^v//' data.txt | \x1b[1mversort\x1b[0m -lif
+"
+    }
+    exit(0);
+}
+
+fn version() {
+    println!("versort {}", env!("CARGO_PKG_VERSION"));
+    exit(0);
+}
+
 fn main() {
-    let mut ignore = false;
-    let mut format = false;
-    let mut lenient = false;
-    let mut count_is_char = false;
     for arg in args().skip(1) {
         if arg.starts_with("--") {
             match arg.as_str() {
-                "--ignore" => ignore = true,
-                "--format" => format = true,
-                "--lenient" => lenient = true,
-                "--count-is-char" => count_is_char = true,
+                "--ignore" => IGNORE.store(true, Lax),
+                "--format" => FORMAT.store(true, Lax),
+                "--lenient" => LENIENT.store(true, Lax),
+                "--charcount" => CHARCOUNT.store(true, Lax),
+                "--verbose" => VERBOSE.store(true, Lax),
+                "--help" => help(),
+                "--version" => version(),
                 _ => eprintln!("Unrecognized flag: {arg}"),
             }
         } else if arg.starts_with('-') && arg.len() > 1 {
             for ch in arg.chars().skip(1) {
                 match ch {
-                    'i' => ignore = true,
-                    'f' => format = true,
-                    'l' => lenient = true,
-                    'c' => count_is_char = true,
+                    'i' => IGNORE.store(true, Lax),
+                    'f' => FORMAT.store(true, Lax),
+                    'l' => LENIENT.store(true, Lax),
+                    'c' => CHARCOUNT.store(true, Lax),
+                    'v' => VERBOSE.store(true, Lax),
+                    'h' => help(),
+                    'V' => version(),
                     _ => eprintln!("Unrecognized flag: {arg}")
                 }
             }
@@ -219,10 +281,10 @@ fn main() {
         .map_while(Result::ok)
         .filter(|l| !l.trim().is_empty())
         .filter_map(|v| {
-            match Semver::parse(&v, lenient, count_is_char) {
+            match v.parse::<Semver>() {
                 Ok(s) => Some((v, s)),
                 Err(e) => {
-                    if ignore { None }
+                    if IGNORE.load(Lax) { None }
                     else {
                         eprintln!("Failed to parse {v} into a semver: {e}");
                         exit(1);
@@ -233,7 +295,7 @@ fn main() {
         .collect::<Vec<_>>();
     semvers.sort_by(|a, b| a.1.cmp(&b.1));
 
-    if format {
+    if FORMAT.load(Lax) {
         println! { "{}", semvers.iter().map(|t| t.1.to_string()).collect::<Vec<_>>().join("\n") }
     } else {
         println! { "{}", semvers.iter().map(|t| t.0.clone()).collect::<Vec<_>>().join("\n") }
