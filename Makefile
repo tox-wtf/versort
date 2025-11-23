@@ -1,10 +1,18 @@
-all: build
+.PHONY: all clean test install
 
-build:
-	cargo build --release
+PREFIX=/usr/local
+BINDIR=$(PREFIX)/bin
 
-test: all
+all: target/release/versort
+
+target/release/versort:
+	@cargo build --release
+
+clean:
+	rm -rf target
+
+test: target/release/versort
 	@tests/test.sh
 
-install:
-	install -Dm755 target/release/versort -t /usr/bin/
+install: target/release/versort
+	install -Dm755 target/release/versort -t $(DESTDIR)$(BINDIR)
