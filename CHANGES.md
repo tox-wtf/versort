@@ -12,3 +12,25 @@
 ### Fixes
 
  - Remove testing instruction from release script
+
+
+## 0.2.2 - 2025-11-23 17:49:15 -0600
+
+### Features
+
+ - Add more examples to help output
+
+### Fixes
+
+ - Add Cargo.toml as a dependency for the versort target
+
+### Chores
+
+ - Add release script
+ - Improve makefile
+
+### Docs
+
+ - Add stub changelog
+ - Add todos
+ - Tweak commands in readme
