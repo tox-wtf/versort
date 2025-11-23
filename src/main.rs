@@ -209,8 +209,21 @@ fn help() {
     \x1b[1m-V | --version\x1b[0m      display version
 
 \x1b[4;1mExamples:\x1b[0m
-    \x1b[1mversort\x1b[0m < data.txt
-    sed 's/^v//' data.txt | \x1b[1mversort\x1b[0m -lif
+    * \x1b[1mversort\x1b[0m < data.txt
+
+    * sed 's/^v//' data.txt | \x1b[1mversort\x1b[0m -lif
+
+    * git ls-remote --tags --refs https://github.com/tox-wtf/vagrant |
+          sed 's,.*/,,' | shuf |
+          \x1b[1mversort\x1b[0m
+
+    * git ls-remote --tags --refs https://github.com/python/cpython |
+          sed -e 's,.*/,,' -e 's,^v,,' | shuf |
+          \x1b[1mversort\x1b[0m -i # ignore semvers that couldn't be parsed
+
+    * git ls-remote --tags --refs https://github.com/tmux/tmux |
+          sed -e 's,.*/,,' | shuf |
+          \x1b[1mversort\x1b[0m -c # treat a single trailing character as a counter
 "
     }
 }
