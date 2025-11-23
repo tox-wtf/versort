@@ -6,3 +6,9 @@
 > Minor breaking changes are prefixed with **[!]**.
 > Major ones are prefixed with **[!!]**.
 
+
+## 0.2.3 - 2025-11-23 17:50:35 -0600
+
+### Fixes
+
+ - Remove testing instruction from release script
