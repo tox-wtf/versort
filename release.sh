@@ -177,7 +177,7 @@ printf %s "$changelog_entry" > "$new_temp"
 # This sed deletes all trailing blank lines (stolen from
 # https://edoras.sdsu.edu/doc/sed-oneliners.html)
 cat "$header_temp" "$new_temp" "$old_temp" |
-    sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' > CHANGES.md.test
+    sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' > CHANGES.md
 
 rm  "$header_temp" "$new_temp" "$old_temp"
 
