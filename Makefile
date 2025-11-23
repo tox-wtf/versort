@@ -5,7 +5,7 @@ BINDIR=$(PREFIX)/bin
 
 all: target/release/versort
 
-target/release/versort:
+target/release/versort: Cargo.toml
 	@cargo build --release
 
 clean:
